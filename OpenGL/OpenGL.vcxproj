@@ -136,6 +136,7 @@
     <None Include="res\object\cylinder\BaseMesh_Anim.fbx" />
     <None Include="res\object\cylinder\Baymax.fbx" />
     <None Include="res\object\cylinder\cylinder.fbx" />
+    <None Include="res\object\cylinder\get_up.fbx" />
     <None Include="res\object\cylinder\Hulk_Animated.fbx" />
     <None Include="res\object\cylinder\SpaceElemental.fbx" />
     <None Include="res\object\cylinder\test.fbx" />

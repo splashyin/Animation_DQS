@@ -120,7 +120,7 @@ int main(void)
 		shader.setMat4("view", view);
 		// render the loaded model
 		glm::mat4 model;
-		model = glm::scale(model, glm::vec3(0.5f, 0.5f, 0.5f));	// it's a bit too big for our scene, so scale it down
+		model = glm::scale(model, glm::vec3(0.05f, 0.05f, 0.05f));	// it's a bit too big for our scene, so scale it down
 		shader.setMat4("model", model);
 		
 		aModel.BoneTransform(animationTime, Transforms, dualQuaternions);
@@ -137,9 +137,22 @@ int main(void)
 
 		for (unsigned int i = 0; i < dualQuaternions.size(); ++i) {
 			DQs[i] = glm::mat2x4_cast(dualQuaternions[i]);
+
+			
+
 			const std::string name = "dqs[" + std::to_string(i) + "]";
 			shader.setMat2x4(name, DQs[i]);
 		}
+
+
+		//Toggle DQS
+		if (glfwGetKey(window, GLFW_KEY_O) == GLFW_PRESS) {
+			shader.setBool("optimised", GL_TRUE);
+		}
+		else {
+			shader.setBool("optimised", GL_FALSE);
+		}
+
 		aModel.Draw(shader);
 		//check and call events and swap the buffers
 		/* Poll for and process events */

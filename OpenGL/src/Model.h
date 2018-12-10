@@ -23,12 +23,12 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 #include "debug.h"
-
+#define GLM_FORCE_CTOR_INIT
 using namespace std;
 
 unsigned int TextureFromFile(const char *path, const string &directory, bool gamma = false);
 glm::mat4 converttoMat4(const aiMatrix4x4 &ai);
-glm::mat4 m_GlobalInverseTransform;
+
 
 class Model
 {
@@ -52,6 +52,11 @@ public:
 	vector<BoneInfo> m_BoneInfo;
 	unsigned int NumVertices = 0;
 
+	glm::mat4 m_GlobalInverseTransform = glm::mat4(1.f);
+
+	glm::fdualquat IdentityDQ = glm::fdualquat(glm::quat(1.f, 0.f, 0.f, 0.f), glm::quat(0.f, 0.f, 0.f, 0.f));
+	glm::fdualquat InverseDQ = IdentityDQ;
+
 	/*  Functions   */
 	// constructor, expects a filepath to a 3D model.
 	Model(string const &path, bool gamma = false) : gammaCorrection(gamma)
@@ -68,7 +73,6 @@ public:
 
 	void BoneTransform(float TimeInSeconds, vector<glm::mat4>& Transforms, vector<glm::fdualquat>& dqs) {
 		glm::mat4 Identity = glm::mat4(1.0f);
-		glm::fdualquat IdentityDQ;
 		unsigned int numPosKeys = scene->mAnimations[0]->mChannels[0]->mNumPositionKeys;
 		float TicksPerSecond = scene->mAnimations[0]->mTicksPerSecond != 0 ?
 			scene->mAnimations[0]->mTicksPerSecond : 25.0f;
@@ -78,11 +82,15 @@ public:
 		ReadNodeHeirarchy(scene, AnimationTime, scene->mRootNode, IdentityDQ);
 
 		Transforms.resize(m_NumBones);
+		
 		dqs.resize(m_NumBones);
 
 		for (size_t i = 0; i < dqs.size(); ++i)
 		{
-			dqs[i] = glm::normalize(m_BoneInfo[i].FinalTransformationDQ);
+			dqs[i] = IdentityDQ;
+			dqs[i] = m_BoneInfo[i].FinalTransformationDQ;
+			
+			debuggingDualQuat(dqs[i]);
 		}
 
 		for (unsigned int i = 0; i < m_NumBones; i++) {
@@ -109,11 +117,12 @@ private:
 		directory = path.substr(0, path.find_last_of('/'));
 		
 		aiMatrix4x4 tp1 = scene->mRootNode->mTransformation;
-		m_GlobalInverseTransform = converttoMat4(tp1);
-		m_GlobalInverseTransform = glm::inverse(m_GlobalInverseTransform);
+		m_GlobalInverseTransform = glm::transpose(glm::make_mat4(&tp1.a1));
 
-		//debuggingMatrix(m_GlobalInverseTransform);
-
+		InverseDQ = glm::fdualquat(glm::quat_cast(m_GlobalInverseTransform), glm::vec3(m_GlobalInverseTransform[3][0], m_GlobalInverseTransform[3][1], m_GlobalInverseTransform[3][2]));
+		if (InverseDQ.dual.w == -0) {
+			InverseDQ.dual.w = 0;
+		}
 		// process ASSIMP's root node recursively
 		processNode(scene->mRootNode, scene);
 	}
@@ -303,60 +312,59 @@ private:
 		}
 	}
 
-	void ReadNodeHeirarchy(const aiScene *scene, float AnimationTime, const aiNode* pNode, const glm::fdualquat& ParentTransform) {
+	void ReadNodeHeirarchy(const aiScene *scene, float AnimationTime, const aiNode* pNode, const glm::fdualquat& ParentDQ) {
 		string NodeName(pNode->mName.data);
 		const aiAnimation* pAnimation = scene->mAnimations[0];
 		glm::mat4 NodeTransformation = glm::mat4(1.0f);
 		aiMatrix4x4 tp1 = pNode->mTransformation;
-		NodeTransformation = converttoMat4(tp1);
+		NodeTransformation = glm::make_mat4(&tp1.a1);
 		const aiNodeAnim* pNodeAnim = nullptr;
 		pNodeAnim = Animations[pAnimation->mName.data][NodeName];
-		glm::fdualquat NodeTransformationDQ;
+		
+		glm::fdualquat NodeTransformationDQ = IdentityDQ;
 		if (pNodeAnim) {
 			//Interpolate rotation and generate rotation transformation matrix
 			aiQuaternion RotationQ;
 			CalcInterpolatedRotaion(RotationQ, AnimationTime, pNodeAnim);
-			glm::fquat rotationQ = glm::fquat(RotationQ.w, RotationQ.x, RotationQ.y, RotationQ.z);
-			glm::mat4 RotationM = glm::toMat4(glm::normalize(rotationQ));
-			//debuggingMatrix(RotationM);
+			glm::fquat rotationQ;
+			rotationQ.w = RotationQ.w;
+			rotationQ.x = RotationQ.x;
+			rotationQ.y = RotationQ.y;
+			rotationQ.z = RotationQ.z;
 
+			glm::mat4 RotationM = glm::toMat4(rotationQ);
 			
 			//Interpolate translation and generate translation transformation matrix
 			aiVector3D Translation;
 			CalcInterpolatedPosition(Translation, AnimationTime, pNodeAnim);
 			glm::mat4 TranslationM = glm::mat4(1.0f);
 			TranslationM = glm::translate(TranslationM, glm::vec3(Translation.x, Translation.y, Translation.z));
-			//debuggingMatrix(TranslationM);
 			NodeTransformation = TranslationM * RotationM;
-			//debuggingMatrix(NodeTransformation);
-			NodeTransformationDQ = glm::fdualquat(glm::normalize(rotationQ), glm::vec3(Translation.x, Translation.y, Translation.z));
+			NodeTransformationDQ = glm::normalize(glm::fdualquat(rotationQ, glm::vec3(Translation.x, Translation.y, Translation.z)));
+			if (NodeTransformationDQ.dual.w == -0) {
+				NodeTransformationDQ.dual.w = 0;
+			}
 		}
 
 		glm::mat4 GlobalTransformation = NodeTransformation;
-		glm::fdualquat GlobalTransformationDQ =  ParentTransform * glm::normalize(NodeTransformationDQ);
-
+		glm::fdualquat GlobalTransformationDQ = glm::normalize(ParentDQ * NodeTransformationDQ);
+		if (GlobalTransformationDQ.dual.w == -0) {
+			GlobalTransformationDQ.dual.w = 0;
+		}
 		if (Bone_Mapping.find(NodeName) != Bone_Mapping.end()) {
  			unsigned int NodeIndex = Bone_Mapping[NodeName];
 
 			m_BoneInfo[NodeIndex].FinalTransformation = m_GlobalInverseTransform * GlobalTransformation * m_BoneInfo[NodeIndex].offset;
 
-			glm::fquat offsetQ = glm::quat_cast(m_BoneInfo[NodeIndex].offset);
-			glm::fdualquat offsetDQ = glm::fdualquat(offsetQ, glm::vec3(m_BoneInfo[NodeIndex].offset[3][0],
-																		m_BoneInfo[NodeIndex].offset[3][1],
-																		m_BoneInfo[NodeIndex].offset[3][2]));
-			glm::fdualquat offsetDQnorm = glm::normalize(offsetDQ);
+			glm::fdualquat offsetDQ = glm::normalize(glm::fdualquat(glm::normalize(glm::quat_cast(m_BoneInfo[NodeIndex].offset)), glm::vec3(m_BoneInfo[NodeIndex].offset[3][0], m_BoneInfo[NodeIndex].offset[3][1], m_BoneInfo[NodeIndex].offset[3][2])));
+			if (offsetDQ.dual.w == -0) {
+				offsetDQ.dual.w = 0;
+			}
 
-			glm::fquat inverseTransformQ = glm::quat_cast(m_GlobalInverseTransform);
-			glm::fdualquat inverseTransformDQ = glm::fdualquat(glm::normalize(inverseTransformQ), glm::vec3(m_GlobalInverseTransform[3][0],
-																											m_GlobalInverseTransform[3][1],
-																											m_GlobalInverseTransform[3][2]));
-			glm::fdualquat inverseTransformDQnorm = glm::normalize(inverseTransformDQ);
-
-
-			glm::fdualquat GlobalTransformationDQnorm = glm::normalize(GlobalTransformationDQ);
-			m_BoneInfo[NodeIndex].FinalTransformationDQ = inverseTransformDQnorm * GlobalTransformationDQnorm * offsetDQnorm;
-
-			//debuggingMatrix(m_BoneInfo[NodeIndex].FinalTransformation);
+			m_BoneInfo[NodeIndex].FinalTransformationDQ = glm::normalize(IdentityDQ * GlobalTransformationDQ * offsetDQ);
+			if (m_BoneInfo[NodeIndex].FinalTransformationDQ.dual.w == -0) {
+				m_BoneInfo[NodeIndex].FinalTransformationDQ.dual.w = 0;
+			}
 		}
 
 		for (unsigned int i = 0; i < pNode->mNumChildren; i++) {

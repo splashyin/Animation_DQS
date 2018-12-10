@@ -13,6 +13,7 @@ uniform mat4 view;
 uniform mat4 projection;
 uniform mat4 gBones[100];
 uniform mat2x4 dqs[100];
+uniform bool optimised;
 
 mat4x4 DQtoMat(vec4 real, vec4 dual) {
 	mat4x4 m;
@@ -46,11 +47,6 @@ mat4x4 DQtoMat(vec4 real, vec4 dual) {
 void main() {
 	
 	TexCoords = aTexCoords;
-	
-	mat4 BoneTransform = gBones[BoneIDs[0]] * Weights[0];
-	BoneTransform += gBones[BoneIDs[1]] * Weights[1];
-	BoneTransform += gBones[BoneIDs[2]] * Weights[2];
-	BoneTransform += gBones[BoneIDs[3]] * Weights[3];
 
 	mat2x4 dq0 = dqs[BoneIDs[0]];
 	mat2x4 dq1 = dqs[BoneIDs[1]];
@@ -67,7 +63,20 @@ void main() {
 	blendDQ += dq3 * Weights[3];
 
 
-	mat4x4 DQmat = DQtoMat(blendDQ[0], blendDQ[1]);
-	vec4 pos = DQmat * vec4(aPos, 1.0);
-	gl_Position = projection * view * model * pos;
+	if (optimised) {
+		float len = length(blendDQ[0]);
+		blendDQ /= len;
+
+		vec3 position = aPos.xyz + 2.0*cross(blendDQ[0].xyz, cross(blendDQ[0].xyz, aPos.xyz) + blendDQ[0].w * aPos.xyz);
+		vec3 trans = 2.0*(blendDQ[0].w * blendDQ[1].xyz - blendDQ[1].w * blendDQ[0].xyz + cross(blendDQ[0].xyz, blendDQ[1].xyz));
+		position += trans;
+
+		gl_Position = projection * view * model * vec4(position, 1.0f);
+	}
+	else {
+		mat4x4 DQmat = DQtoMat(blendDQ[0], blendDQ[1]);
+		vec4 pos = DQmat * vec4(aPos, 1.0);
+		gl_Position = projection * view * model * pos;
+	}
+
 }

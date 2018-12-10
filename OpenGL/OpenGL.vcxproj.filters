@@ -33,6 +33,7 @@
     <None Include="res\object\cylinder\alien.fbx" />
     <None Include="res\object\cylinder\Hulk_Animated.fbx" />
     <None Include="res\object\body\alien.fbx" />
+    <None Include="res\object\cylinder\get_up.fbx" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\Shader.h">
